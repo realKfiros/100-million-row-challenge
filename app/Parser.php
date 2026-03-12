@@ -19,7 +19,7 @@ final class Parser {
 		$grouped_data = Parser::groupCounts($counts);
 		unset($counts);
 
-		Parser::writeJson($grouped_data, $output_path);
+		file_put_contents(Parser::$output_path, json_encode($grouped_data, JSON_PRETTY_PRINT));
 	}
 
 	private static function countVisits(): array {
@@ -56,32 +56,5 @@ final class Parser {
 			$grouped_data[$url][$date] = $count;
 		}
 		return $grouped_data;
-	}
-
-	private static function writeJson(array $grouped_data): void {
-		$output = fopen(Parser::$output_path, 'w');
-		fwrite($output, "{\n\t");
-		$first_url = true;
-		foreach ($grouped_data as $url => $dates) {
-			if (!$first_url) {
-				fwrite($output, ",\n\t");
-			}
-			$first_url = false;
-			fwrite($output, json_encode((string) $url, JSON_PRETTY_PRINT));
-			fwrite($output, ": {\n\t\t");
-			$first_date = true;
-			foreach ($dates as $date => $count) {
-				if (!$first_date) {
-					fwrite($output, ",\n\t\t");
-				}
-				$first_date = false;
-				fwrite($output, json_encode((string) $date));
-				fwrite($output, ": ");
-				fwrite($output, json_encode((int) $count));
-			}
-			fwrite($output, "\n\t}");
-		}
-		fwrite($output, "\n}");
-		fclose($output);
 	}
 }
