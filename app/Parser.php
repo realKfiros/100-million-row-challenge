@@ -2,6 +2,8 @@
 
 namespace App;
 
+use App\Commands\Visit;
+
 final class Parser {
 	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io";
 	private const int DATE_LEN = 10;		// "2026-12-03"
@@ -9,6 +11,7 @@ final class Parser {
 	private static string $input_path = '';
 	private static string $output_path = '';
 	private const int READ_CHUNK_SIZE = 1_048_576;
+	private static ?array $known_paths = null;
 
 	public function parse(string $input_path, string $output_path): void {
 		[$date_id_map, $date_list] = Parser::buildDateRegistry();
@@ -17,7 +20,7 @@ final class Parser {
 		Parser::$input_path = $input_path;
 		Parser::$output_path = $output_path;
 
-		$paths = Parser::discoverPaths();
+		$paths = Parser::getKnownPaths();
 		$path_count = count($paths);
 
 		$path_base_map = [];
@@ -29,6 +32,22 @@ final class Parser {
 
 		Parser::countVisits($path_base_map, $date_id_map, $counts);
 		Parser::writePrettyJson($counts, $paths, $date_list, $date_count);
+	}
+
+	private static function getKnownPaths(): array {
+		if (Parser::$known_paths !== null) {
+			return Parser::$known_paths;
+		}
+
+		$paths = [];
+
+		foreach (Visit::all() as $visit) {
+			$paths[] = substr($visit->uri, Parser::URI_PREFIX_LEN);
+		}
+
+		sort($paths, SORT_STRING);
+
+		return Parser::$known_paths = $paths;
 	}
 
 	private static function buildDateRegistry(): array {
@@ -62,29 +81,6 @@ final class Parser {
 
 	private static function isLeapYear(int $year): bool {
 		return ($year % 4 === 0 && $year % 100 !== 0) || ($year % 400 === 0);
-	}
-
-	private static function discoverPaths(): array {
-		$input = fopen(Parser::$input_path, 'r');
-
-		$path_set = [];
-
-		while (($line = fgets($input)) !== false) {
-			$comma = strpos($line, ',');
-			if ($comma === false || $comma <= Parser::URI_PREFIX_LEN) {
-				continue;
-			}
-
-			$path = substr($line, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
-			$path_set[$path] = true;
-		}
-
-		fclose($input);
-
-		$paths = array_keys($path_set);
-		sort($paths, SORT_STRING);
-
-		return $paths;
 	}
 
 	private static function countVisits(array $path_base_map, array $date_id_map, array &$counts): void {
@@ -188,7 +184,7 @@ final class Parser {
 
 		$date_prefixes = [];
 		for ($date_id = 0; $date_id < $date_count; ++$date_id) {
-			$date_prefixes[$date_id] = '        "' . $date_list[$date_id] . '": ';
+			$date_prefixes[$date_id] = '\t\t"' . $date_list[$date_id] . '": ';
 		}
 
 		$separator = '';
@@ -209,7 +205,7 @@ final class Parser {
 			}
 
 			$buffer = $separator;
-			$buffer .= '    ' . json_encode($path, JSON_UNESCAPED_SLASHES) . ": {\n";
+			$buffer .= "\t" . json_encode($path, JSON_UNESCAPED_SLASHES) . ": {\n";
 			$buffer .= $date_prefixes[$first_date_id] . $counts[$base + $first_date_id];
 
 			for ($date_id = $first_date_id + 1; $date_id < $date_count; ++$date_id) {
@@ -222,7 +218,7 @@ final class Parser {
 				$buffer .= $date_prefixes[$date_id] . $count;
 			}
 
-			$buffer .= "\n    }";
+			$buffer .= "\n\t}";
 
 			fwrite($output, $buffer);
 			$separator = ",\n";
