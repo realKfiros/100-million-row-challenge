@@ -3,13 +3,21 @@
 namespace App;
 
 final class Parser {
+	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io";
+	private const int DATE_LEN = 10;		// "2026-12-03"
+
 	public function parse(string $input_path, string $output_path): void {
 		$input = fopen($input_path, 'r');
 		$data = [];
-		while (false !== $visit = fgetcsv($input, escape: '\\')) {
-			[$url, $date] = $visit;
-			$url = substr($url, 19);
-			$date = substr($date, 0, 10);
+		while (false !== $visit = fgets($input)) {
+			$comma = strpos($visit, ',');
+			if ($comma === false) {
+				continue;
+			}
+
+			$url = substr($visit, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
+			$date = substr($visit, $comma + 1, Parser::DATE_LEN);
+
 			if (!isset($data[$url])) {
 				$data[$url] = [];
 			}
