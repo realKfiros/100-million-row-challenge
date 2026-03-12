@@ -40,6 +40,37 @@ final class Parser {
 
 		unset($counts);
 
-		file_put_contents($output_path, json_encode($grouped_data, JSON_PRETTY_PRINT));
+		Parser::writeJson($grouped_data, $output_path);
+	}
+
+	private static function writeJson(array $grouped_data, string $output_path): void {
+		$output = fopen($output_path, 'w');
+
+		fwrite($output, "{\n\t");
+		$first_url = true;
+		foreach ($grouped_data as $url => $dates) {
+			if (!$first_url) {
+				fwrite($output, ",\n\t");
+			}
+			$first_url = false;
+			fwrite($output, json_encode((string) $url, JSON_PRETTY_PRINT));
+			fwrite($output, ": {\n\t\t");
+
+			$first_date = true;
+			foreach ($dates as $date => $count) {
+				if (!$first_date) {
+					fwrite($output, ",\n\t\t");
+				}
+				$first_date = false;
+				fwrite($output, json_encode((string) $date));
+				fwrite($output, ": ");
+				fwrite($output, json_encode((int) $count));
+			}
+
+			fwrite($output, "\n\t}");
+		}
+
+		fwrite($output, "\n}");
+		fclose($output);
 	}
 }
