@@ -225,7 +225,7 @@ final class Parser {
 			}
 
 			$buffer = $separator;
-			$buffer .= "\t" . json_encode($path, JSON_UNESCAPED_SLASHES) . ": {\n";
+			$buffer .= "\t" . json_encode($path, JSON_PRETTY_PRINT) . ": {\n";
 			$buffer .= $date_prefixes[$first_date_id] . $counts[$base + $first_date_id];
 
 			for ($date_id = $first_date_id + 1; $date_id < $date_count; ++$date_id) {
