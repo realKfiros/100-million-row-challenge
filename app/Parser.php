@@ -5,13 +5,14 @@ namespace App;
 use App\Commands\Visit;
 
 final class Parser {
-	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io";
+	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io"
 	private const int DATE_LEN = 10;		// "2026-12-03"
+	private const int READ_CHUNK_SIZE = 2_097_152;
 
 	private static string $input_path = '';
 	private static string $output_path = '';
-	private const int READ_CHUNK_SIZE = 1_048_576;
 	private static ?array $known_paths = null;
+	private static ?array $date_registry = null;
 
 	public function parse(string $input_path, string $output_path): void {
 		[$date_id_map, $date_list] = Parser::buildDateRegistry();
@@ -51,6 +52,10 @@ final class Parser {
 	}
 
 	private static function buildDateRegistry(): array {
+		if (Parser::$date_registry !== null) {
+			return Parser::$date_registry;
+		}
+
 		$date_id_map = [];
 		$date_list = [];
 		$date_id = 0;
@@ -76,7 +81,7 @@ final class Parser {
 			}
 		}
 
-		return [$date_id_map, $date_list];
+		return Parser::$date_registry = [$date_id_map, $date_list];
 	}
 
 	private static function isLeapYear(int $year): bool {
@@ -95,7 +100,10 @@ final class Parser {
 				break;
 			}
 
-			$buffer = $tail . $buffer;
+			if ($tail !== '') {
+				$buffer = $tail . $buffer;
+			}
+
 			$last_newline = strrpos($buffer, "\n");
 
 			if ($last_newline === false) {
@@ -126,9 +134,8 @@ final class Parser {
 				break;
 			}
 
-			$line_len = $eol - $offset;
-			if ($line_len > 0) {
-				Parser::countLineSlice($chunk, $offset, $line_len, $path_base_map, $date_id_map, $counts);
+			if ($eol > $offset) {
+				Parser::countLineSlice($chunk, $offset, $eol, $path_base_map, $date_id_map, $counts);
 			}
 
 			$offset = $eol + 1;
@@ -136,8 +143,19 @@ final class Parser {
 	}
 
 	private static function countLine(string $line, array $path_base_map, array $date_id_map, array &$counts): void {
-		$line = rtrim($line, "\r\n");
-		if ($line === '') {
+		$line_len = strlen($line);
+		if ($line_len === 0) {
+			return;
+		}
+
+		if ($line[$line_len - 1] === "\n") {
+			--$line_len;
+			if ($line_len > 0 && $line[$line_len - 1] === "\r") {
+				--$line_len;
+			}
+		}
+
+		if ($line_len === 0) {
 			return;
 		}
 
@@ -149,32 +167,34 @@ final class Parser {
 		$path = substr($line, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
 		$date = substr($line, $comma + 1, Parser::DATE_LEN);
 
-		if (!isset($path_base_map[$path], $date_id_map[$date])) {
+		$path_base = $path_base_map[$path] ?? null;
+		$date_id = $date_id_map[$date] ?? null;
+
+		if ($path_base === null || $date_id === null) {
 			return;
 		}
 
-		++$counts[$path_base_map[$path] + $date_id_map[$date]];
+		++$counts[$path_base + $date_id];
 	}
 
-	private static function countLineSlice(string $chunk, int $line_offset, int $line_len, array $path_base_map, array $date_id_map, array &$counts): void {
+	private static function countLineSlice(string $chunk, int $line_offset, int $eol, array $path_base_map, array $date_id_map, array &$counts): void {
 		$comma = strpos($chunk, ',', $line_offset);
-		if ($comma === false || $comma >= $line_offset + $line_len || $comma <= $line_offset + Parser::URI_PREFIX_LEN) {
+		if ($comma === false || $comma >= $eol || $comma <= $line_offset + Parser::URI_PREFIX_LEN) {
 			return;
 		}
 
-		$path = substr(
-			$chunk,
-			$line_offset + Parser::URI_PREFIX_LEN,
-			$comma - ($line_offset + Parser::URI_PREFIX_LEN)
-		);
-
+		$path_start = $line_offset + Parser::URI_PREFIX_LEN;
+		$path = substr($chunk, $path_start, $comma - $path_start);
 		$date = substr($chunk, $comma + 1, Parser::DATE_LEN);
 
-		if (!isset($path_base_map[$path], $date_id_map[$date])) {
+		$path_base = $path_base_map[$path] ?? null;
+		$date_id = $date_id_map[$date] ?? null;
+
+		if ($path_base === null || $date_id === null) {
 			return;
 		}
 
-		++$counts[$path_base_map[$path] + $date_id_map[$date]];
+		++$counts[$path_base + $date_id];
 	}
 
 	private static function writePrettyJson(array $counts, array $paths, array $date_list, int $date_count): void {
@@ -184,7 +204,7 @@ final class Parser {
 
 		$date_prefixes = [];
 		for ($date_id = 0; $date_id < $date_count; ++$date_id) {
-			$date_prefixes[$date_id] = '\t\t"' . $date_list[$date_id] . '": ';
+			$date_prefixes[$date_id] = "\t\t\"" . $date_list[$date_id] . '": ';
 		}
 
 		$separator = '';
