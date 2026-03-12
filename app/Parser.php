@@ -18,13 +18,11 @@ final class Parser {
 			$url = substr($visit, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
 			$date = substr($visit, $comma + 1, Parser::DATE_LEN);
 
-			if (!isset($data[$url])) {
-				$data[$url] = [];
+			if (isset($data[$url][$date])) {
+				++$data[$url][$date];
+			} else {
+				$data[$url][$date] = 1;
 			}
-			if (!isset($data[$url][$date])) {
-				$data[$url][$date] = 0;
-			}
-			$data[$url][$date]++;
 		}
 		fclose($input);
 		file_put_contents($output_path, json_encode($data, JSON_PRETTY_PRINT));
