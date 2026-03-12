@@ -9,22 +9,63 @@ final class Parser {
 
 	private static string $input_path = '';
 	private static string $output_path = '';
+	private static ?array $date_to_id = null;
+	private static ?array $id_to_date = null;
 
 	public function parse(string $input_path, string $output_path): void {
+		Parser::initDateRegistry();
+
 		Parser::$input_path = $input_path;
 		Parser::$output_path = $output_path;
 
 		$counts = Parser::countVisits();
 
-		$grouped_data = Parser::groupCounts($counts);
-		unset($counts);
+		file_put_contents(Parser::$output_path, json_encode($counts, JSON_PRETTY_PRINT));
 
-		file_put_contents(Parser::$output_path, json_encode($grouped_data, JSON_PRETTY_PRINT));
+		unset($counts);
+	}
+
+	private static function initDateRegistry(): void {
+		if (self::$date_to_id !== null && self::$id_to_date !== null) {
+			return;
+		}
+
+		$date_to_id = [];
+		$id_to_date = [];
+		$id = 0;
+
+		for ($year = 2021; $year <= 2026; ++$year) {
+			for ($month = 1; $month <= 12; ++$month) {
+				$max_day = match ($month) {
+					2 => self::isLeapYear($year) ? 29 : 28,
+					4, 6, 9, 11 => 30,
+					default => 31,
+				};
+
+				for ($day = 1; $day <= $max_day; ++$day) {
+					$date =
+						$year . '-' .
+						($month < 10 ? '0' : '') . $month . '-' .
+						($day < 10 ? '0' : '') . $day;
+
+					$date_to_id[$date] = $id;
+					$id_to_date[$id] = $date;
+					++$id;
+				}
+			}
+		}
+
+		self::$date_to_id = $date_to_id;
+		self::$id_to_date = $id_to_date;
+	}
+
+	private static function isLeapYear(int $year): bool {
+		return ($year % 4 === 0 && $year % 100 !== 0) || ($year % 400 === 0);
 	}
 
 	private static function countVisits(): array {
 		$input = fopen(Parser::$input_path, 'r');
-		$counts = [];
+		$data = [];
 		while (false !== $visit = fgets($input)) {
 			$comma = strpos($visit, ',');
 			if ($comma === false) {
@@ -33,28 +74,27 @@ final class Parser {
 
 			$url = substr($visit, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
 			$date = substr($visit, $comma + 1, Parser::DATE_LEN);
-			$key = $url . Parser::KEY_SEPARATOR . $date;
-			if (isset($counts[$key])) {
-				++$counts[$key];
-			} else {
-				$counts[$key] = 1;
-			}
-		}
-		fclose($input);
-		return $counts;
-	}
 
-	private static function groupCounts(array $counts): array {
-		$grouped_data = [];
-		foreach ($counts as $key => $count) {
-			$separator = strrpos($key, Parser::KEY_SEPARATOR);
-			$url = substr($key, 0, $separator);
-			$date = substr($key, $separator + 1);
-			if (!isset($grouped_data[$url])) {
-				$grouped_data[$url] = [];
+			$day_id = self::$date_to_id[$date] ?? null;
+			if ($day_id === null) {
+				continue;
 			}
-			$grouped_data[$url][$date] = $count;
+
+			if (isset($data[$url][$day_id])) {
+				++$data[$url][$day_id];
+			} else {
+				$data[$url][$day_id] = 1;
+			}
 		}
-		return $grouped_data;
+
+		fclose($input);
+
+		foreach ($data as &$days) {
+			ksort($days, SORT_NUMERIC);
+		}
+
+		unset($days);
+
+		return $data;
 	}
 }
