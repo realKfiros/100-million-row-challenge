@@ -7,12 +7,13 @@ use App\Commands\Visit;
 final class Parser {
 	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io"
 	private const int READ_CHUNK_SIZE = 1_048_576;
-	private const int BASE_YEAR = 2021;
+	private const int NEXT_PATH_OFFSET = 46;
 
 	private static string $input_path = '';
 	private static string $output_path = '';
 	private static ?array $known_path_set = null;
 	private static ?array $date_list = null;
+	private static ?array $year_offsets = null;
 	private static ?array $month_offsets_common = null;
 	private static ?array $month_offsets_leap = null;
 
@@ -84,6 +85,21 @@ final class Parser {
 		return Parser::$date_list = $date_list;
 	}
 
+	private static function initYearOffsets(): void {
+		if (!empty(Parser::$year_offsets)) {
+			return;
+		}
+
+		Parser::$year_offsets = [
+			2021 => 0,
+			2022 => 365,
+			2023 => 730,
+			2024 => 1095,
+			2025 => 1461,
+			2026 => 1826,
+		];
+	}
+
 	// get the day of year of the start of every month
 	private static function initMonthOffsets(): void {
 		if (!empty(Parser::$month_offsets_common)) {
@@ -126,25 +142,121 @@ final class Parser {
 				continue;
 			}
 
-			$offset = 0;
-			while ($offset < $last_newline) {
-				$eol = strpos($buffer, "\n", $offset);
-				if ($eol === false || $eol > $last_newline) {
+			$chunk_len = $last_newline;
+			$p = self::URI_PREFIX_LEN;
+			$fence = $chunk_len - 1024;
+
+			while ($p < $fence) {
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
 					break;
 				}
 
-				$comma = strpos($buffer, ',', $offset);
-				if ($comma !== false && $comma < $eol && $comma > $offset + self::URI_PREFIX_LEN) {
-					$path_start = $offset + self::URI_PREFIX_LEN;
-					$path = substr($buffer, $path_start, $comma - $path_start);
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
 
-					if (isset($known_path_set[$path]) && !isset($seen[$path])) {
-						$seen[$path] = true;
-						$paths[] = $path;
-					}
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
 				}
 
-				$offset = $eol + 1;
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+			}
+
+			while ($p < $chunk_len) {
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$seen[$path] = true;
+					$paths[] = $path;
+				}
+
+				$p = $sep + self::NEXT_PATH_OFFSET;
 			}
 
 			$tail = substr($buffer, $last_newline + 1);
@@ -167,6 +279,7 @@ final class Parser {
 
 	// counts the visits to each blogpost (path)
 	private static function countVisits(array $path_base_map, array &$counts): void {
+		Parser::initYearOffsets();
 		Parser::initMonthOffsets();
 
 		$input = fopen(Parser::$input_path, 'r');
@@ -191,28 +304,151 @@ final class Parser {
 				continue;
 			}
 
-			$offset = 0;
-			while ($offset < $last_newline) {
-				$eol = strpos($buffer, "\n", $offset);
-				if ($eol === false || $eol > $last_newline) {
+			$chunk_len = $last_newline;
+			$p = self::URI_PREFIX_LEN;
+
+			// keep a bit of space in the end so it won't override the limit in the aggressive loop
+			$fence = $chunk_len - 1024;
+
+			while ($p < $fence) {
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
 					break;
 				}
 
-				$comma = strpos($buffer, ',', $offset);
-				if ($comma !== false && $comma < $eol && $comma > $offset + self::URI_PREFIX_LEN) {
-					$path_start = $offset + self::URI_PREFIX_LEN;
-					$path = substr($buffer, $path_start, $comma - $path_start);
-					$path_base = $path_base_map[$path] ?? null;
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
 
-					if ($path_base !== null) {
-						$date_id = Parser::parseDateId($buffer, $comma + 1);
-						if ($date_id !== null) {
-							++$counts[$path_base + $date_id];
-						}
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+				$p = $sep + self::NEXT_PATH_OFFSET;
+			}
+
+			// safe chunk for the fallback's end
+			while ($p < $chunk_len) {
+				$sep = strpos($buffer, ',', $p);
+				if ($sep === false || $sep >= $chunk_len) {
+					break;
+				}
+
+				$path = substr($buffer, $p, $sep - $p);
+				$path_base = $path_base_map[$path] ?? null;
+				if ($path_base !== null) {
+					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					if ($date_id !== null) {
+						++$counts[$path_base + $date_id];
 					}
 				}
 
-				$offset = $eol + 1;
+				$p = $sep + self::NEXT_PATH_OFFSET;
 			}
 
 			$tail = substr($buffer, $last_newline + 1);
@@ -254,31 +490,25 @@ final class Parser {
 		}
 
 		$year =
-			(ord($buffer[$offset]) - 48) * 1000 +
-			(ord($buffer[$offset + 1]) - 48) * 100 +
-			(ord($buffer[$offset + 2]) - 48) * 10 +
+			((ord($buffer[$offset]) - 48) * 1000) +
+			((ord($buffer[$offset + 1]) - 48) * 100) +
+			((ord($buffer[$offset + 2]) - 48) * 10) +
 			(ord($buffer[$offset + 3]) - 48);
 
 		$month =
-			(ord($buffer[$offset + 5]) - 48) * 10 +
+			((ord($buffer[$offset + 5]) - 48) * 10) +
 			(ord($buffer[$offset + 6]) - 48);
 
 		$day =
-			(ord($buffer[$offset + 8]) - 48) * 10 +
+			((ord($buffer[$offset + 8]) - 48) * 10) +
 			(ord($buffer[$offset + 9]) - 48);
 
-		if ($year < 2021 || $year > 2026 || $month < 1 || $month > 12 || $day < 1 || $day > 31) {
+		$year_offset = Parser::$year_offsets[$year] ?? null;
+		if ($year_offset === null || $month < 1 || $month > 12 || $day < 1 || $day > 31) {
 			return null;
 		}
 
-		$year_offset = 0;
-		for ($y = self::BASE_YEAR; $y < $year; ++$y) {
-			$year_offset += self::isLeapYear($y) ? 366 : 365;
-		}
-
-		$month_offsets = self::isLeapYear($year)
-			? self::$month_offsets_leap
-			: self::$month_offsets_common;
+		$month_offsets = ($year === 2024) ? self::$month_offsets_leap : self::$month_offsets_common;
 
 		return $year_offset + $month_offsets[$month - 1] + ($day - 1);
 	}
