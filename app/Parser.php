@@ -6,16 +6,18 @@ use App\Commands\Visit;
 
 final class Parser {
 	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io"
-	private const int DATE_LEN = 10;		// "2026-12-03"
 	private const int READ_CHUNK_SIZE = 1_048_576;
+	private const int BASE_YEAR = 2021;
 
 	private static string $input_path = '';
 	private static string $output_path = '';
 	private static ?array $known_path_set = null;
-	private static ?array $date_registry = null;
+	private static ?array $date_list = null;
+	private static ?array $month_offsets_common = null;
+	private static ?array $month_offsets_leap = null;
 
 	public function parse(string $input_path, string $output_path): void {
-		[$date_id_map, $date_list] = Parser::buildDateRegistry();
+		$date_list = Parser::buildDateList();
 		$date_count = count($date_list);
 
 		Parser::$input_path = $input_path;
@@ -31,12 +33,13 @@ final class Parser {
 
 		$counts = array_fill(0, $path_count * $date_count, 0);
 
-		Parser::countVisits($path_base_map, $date_id_map, $counts);
+		Parser::countVisits($path_base_map, $counts);
 		Parser::writePrettyJson($counts, $paths, $date_list, $date_count);
 	}
 
+	// get all the known paths
 	private static function getKnownPathSet(): array {
-		if (Parser::$known_path_set !== null) {
+		if (!empty(Parser::$known_path_set)) {
 			return Parser::$known_path_set;
 		}
 
@@ -50,40 +53,12 @@ final class Parser {
 		return Parser::$known_path_set = $known_path_set;
 	}
 
-	private static function discoverPaths(): array {
-		$input = fopen(Parser::$input_path, 'r');
-
-		$known_path_set = Parser::getKnownPathSet();
-		$paths = [];
-		$seen = [];
-
-		while (($line = fgets($input)) !== false) {
-			$comma = strpos($line, ',');
-			if ($comma === false || $comma <= Parser::URI_PREFIX_LEN) {
-				continue;
-			}
-
-			$path = substr($line, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
-
-			if (!isset($known_path_set[$path]) || isset($seen[$path])) {
-				continue;
-			}
-
-			$seen[$path] = true;
-			$paths[] = $path;
+	// build a list of all the dates we'll be counting - in our case the start of 2021 to the end of 2026
+	private static function buildDateList(): array {
+		if (!empty(Parser::$date_list)) {
+			return Parser::$date_list;
 		}
 
-		fclose($input);
-
-		return $paths;
-	}
-
-	private static function buildDateRegistry(): array {
-		if (Parser::$date_registry !== null) {
-			return Parser::$date_registry;
-		}
-
-		$date_id_map = [];
 		$date_list = [];
 		$date_id = 0;
 
@@ -96,30 +71,42 @@ final class Parser {
 				};
 
 				for ($day = 1; $day <= $max_day; ++$day) {
-					$date =
+					$date_list[$date_id++] =
 						$year . '-' .
 						($month < 10 ? '0' : '') . $month . '-' .
 						($day < 10 ? '0' : '') . $day;
-
-					$date_id_map[$date] = $date_id;
-					$date_list[$date_id] = $date;
-					++$date_id;
 				}
 			}
 		}
 
-		return Parser::$date_registry = [$date_id_map, $date_list];
+		return Parser::$date_list = $date_list;
+	}
+
+	// get the day of year of the start of every month
+	private static function initMonthOffsets(): void {
+		if (!empty(Parser::$month_offsets_common)) {
+			return;
+		}
+
+		// start of every month in a common year and in a leap year
+		Parser::$month_offsets_common = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+		Parser::$month_offsets_leap = [0, 31, 60, 91, 121, 152, 182, 213, 244, 274, 305, 335];
 	}
 
 	private static function isLeapYear(int $year): bool {
 		return ($year % 4 === 0 && $year % 100 !== 0) || ($year % 400 === 0);
 	}
 
-	private static function countVisits(array $path_base_map, array $date_id_map, array &$counts): void {
+	// read the whole csv and extract the paths
+	private static function discoverPaths(): array {
 		$input = fopen(Parser::$input_path, 'r');
 
+		$known_path_set = Parser::getKnownPathSet();
+		$paths = [];
+		$seen = [];
 		$tail = '';
 
+		// optimization - read 1mb of data every time
 		while (!feof($input)) {
 			$buffer = fread($input, Parser::READ_CHUNK_SIZE);
 
@@ -132,96 +119,167 @@ final class Parser {
 			}
 
 			$last_newline = strrpos($buffer, "\n");
-
 			if ($last_newline === false) {
 				$tail = $buffer;
 				continue;
 			}
 
-			$chunk = substr($buffer, 0, $last_newline + 1);
-			$tail = substr($buffer, $last_newline + 1);
+			$offset = 0;
+			while ($offset < $last_newline) {
+				$eol = strpos($buffer, "\n", $offset);
+				if ($eol === false || $eol > $last_newline) {
+					break;
+				}
 
-			Parser::countChunk($chunk, $path_base_map, $date_id_map, $counts);
+				$comma = strpos($buffer, ',', $offset);
+				if ($comma !== false && $comma < $eol && $comma > $offset + self::URI_PREFIX_LEN) {
+					$path_start = $offset + self::URI_PREFIX_LEN;
+					$path = substr($buffer, $path_start, $comma - $path_start);
+
+					if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+						$seen[$path] = true;
+						$paths[] = $path;
+					}
+				}
+
+				$offset = $eol + 1;
+			}
+
+			$tail = substr($buffer, $last_newline + 1);
 		}
 
 		if ($tail !== '') {
-			Parser::countLine($tail, $path_base_map, $date_id_map, $counts);
+			$comma = strpos($tail, ',');
+			if ($comma !== false && $comma > self::URI_PREFIX_LEN) {
+				$path = substr($tail, self::URI_PREFIX_LEN, $comma - self::URI_PREFIX_LEN);
+				if (isset($known_path_set[$path]) && !isset($seen[$path])) {
+					$paths[] = $path;
+				}
+			}
+		}
+
+		fclose($input);
+
+		return $paths;
+	}
+
+	// counts the visits to each blogpost (path)
+	private static function countVisits(array $path_base_map, array &$counts): void {
+		Parser::initMonthOffsets();
+
+		$input = fopen(Parser::$input_path, 'r');
+
+		$tail = '';
+
+		// optimization - read 1mb of data every time
+		while (!feof($input)) {
+			$buffer = fread($input, Parser::READ_CHUNK_SIZE);
+
+			if ($buffer === '') {
+				break;
+			}
+
+			if ($tail !== '') {
+				$buffer = $tail . $buffer;
+			}
+
+			$last_newline = strrpos($buffer, "\n");
+			if ($last_newline === false) {
+				$tail = $buffer;
+				continue;
+			}
+
+			$offset = 0;
+			while ($offset < $last_newline) {
+				$eol = strpos($buffer, "\n", $offset);
+				if ($eol === false || $eol > $last_newline) {
+					break;
+				}
+
+				$comma = strpos($buffer, ',', $offset);
+				if ($comma !== false && $comma < $eol && $comma > $offset + self::URI_PREFIX_LEN) {
+					$path_start = $offset + self::URI_PREFIX_LEN;
+					$path = substr($buffer, $path_start, $comma - $path_start);
+					$path_base = $path_base_map[$path] ?? null;
+
+					if (!empty($path_base)) {
+						$date_id = Parser::parseDateId($buffer, $comma + 1);
+						if (!empty($date_id)) {
+							++$counts[$path_base + $date_id];
+						}
+					}
+				}
+
+				$offset = $eol + 1;
+			}
+
+			$tail = substr($buffer, $last_newline + 1);
+		}
+
+		if ($tail !== '') {
+			$comma = strpos($tail, ',');
+			if ($comma !== false && $comma > self::URI_PREFIX_LEN) {
+				$path = substr($tail, self::URI_PREFIX_LEN, $comma - self::URI_PREFIX_LEN);
+				$path_base = $path_base_map[$path] ?? null;
+
+				if (!empty($path_base)) {
+					$date_id = Parser::parseDateId($tail, $comma + 1);
+					if (!empty($date_id)) {
+						++$counts[$path_base + $date_id];
+					}
+				}
+			}
 		}
 
 		fclose($input);
 	}
 
-	private static function countChunk(string $chunk, array $path_base_map, array $date_id_map, array &$counts): void {
-		$offset = 0;
-		$chunk_len = strlen($chunk);
-
-		while ($offset < $chunk_len) {
-			$eol = strpos($chunk, "\n", $offset);
-			if ($eol === false) {
-				break;
-			}
-
-			if ($eol > $offset) {
-				Parser::countLineSlice($chunk, $offset, $eol, $path_base_map, $date_id_map, $counts);
-			}
-
-			$offset = $eol + 1;
-		}
-	}
-
-	private static function countLine(string $line, array $path_base_map, array $date_id_map, array &$counts): void {
-		$line_len = strlen($line);
-		if ($line_len === 0) {
-			return;
+	// parse the buffer and fetch the date id according to the offset given
+	// year offset - days in years from 2021 to the given year, month offset - days in months from the start of the year to the given month, day offset - well... the days in the month
+	private static function parseDateId(string $buffer, int $offset): ?int {
+		if (!isset(
+			$buffer[$offset + 9],
+			$buffer[$offset + 8],
+			$buffer[$offset + 7],
+			$buffer[$offset + 6],
+			$buffer[$offset + 5],
+			$buffer[$offset + 4],
+			$buffer[$offset + 3],
+			$buffer[$offset + 2],
+			$buffer[$offset + 1],
+			$buffer[$offset]
+		)) {
+			return null;
 		}
 
-		if ($line[$line_len - 1] === "\n") {
-			--$line_len;
-			if ($line_len > 0 && $line[$line_len - 1] === "\r") {
-				--$line_len;
-			}
+		$year =
+			(ord($buffer[$offset]) - 48) * 1000 +
+			(ord($buffer[$offset + 1]) - 48) * 100 +
+			(ord($buffer[$offset + 2]) - 48) * 10 +
+			(ord($buffer[$offset + 3]) - 48);
+
+		$month =
+			(ord($buffer[$offset + 5]) - 48) * 10 +
+			(ord($buffer[$offset + 6]) - 48);
+
+		$day =
+			(ord($buffer[$offset + 8]) - 48) * 10 +
+			(ord($buffer[$offset + 9]) - 48);
+
+		if ($year < 2021 || $year > 2026 || $month < 1 || $month > 12 || $day < 1 || $day > 31) {
+			return null;
 		}
 
-		if ($line_len === 0) {
-			return;
+		$year_offset = 0;
+		for ($y = self::BASE_YEAR; $y < $year; ++$y) {
+			$year_offset += self::isLeapYear($y) ? 366 : 365;
 		}
 
-		$comma = strpos($line, ',');
-		if ($comma === false || $comma <= Parser::URI_PREFIX_LEN) {
-			return;
-		}
+		$month_offsets = self::isLeapYear($year)
+			? self::$month_offsets_leap
+			: self::$month_offsets_common;
 
-		$path = substr($line, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
-		$date = substr($line, $comma + 1, Parser::DATE_LEN);
-
-		$path_base = $path_base_map[$path] ?? null;
-		$date_id = $date_id_map[$date] ?? null;
-
-		if ($path_base === null || $date_id === null) {
-			return;
-		}
-
-		++$counts[$path_base + $date_id];
-	}
-
-	private static function countLineSlice(string $chunk, int $line_offset, int $eol, array $path_base_map, array $date_id_map, array &$counts): void {
-		$comma = strpos($chunk, ',', $line_offset);
-		if ($comma === false || $comma >= $eol || $comma <= $line_offset + Parser::URI_PREFIX_LEN) {
-			return;
-		}
-
-		$path_start = $line_offset + Parser::URI_PREFIX_LEN;
-		$path = substr($chunk, $path_start, $comma - $path_start);
-		$date = substr($chunk, $comma + 1, Parser::DATE_LEN);
-
-		$path_base = $path_base_map[$path] ?? null;
-		$date_id = $date_id_map[$date] ?? null;
-
-		if ($path_base === null || $date_id === null) {
-			return;
-		}
-
-		++$counts[$path_base + $date_id];
+		return $year_offset + $month_offsets[$month - 1] + ($day - 1);
 	}
 
 	private static function writePrettyJson(array $counts, array $paths, array $date_list, int $date_count): void {
