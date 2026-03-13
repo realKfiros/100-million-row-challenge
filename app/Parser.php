@@ -17,6 +17,8 @@ final class Parser {
 	private static ?array $month_offsets_leap = null;
 
 	public function parse(string $input_path, string $output_path): void {
+		gc_disable();
+
 		$date_list = Parser::buildDateList();
 		$date_count = count($date_list);
 
