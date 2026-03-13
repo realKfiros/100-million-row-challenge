@@ -7,11 +7,11 @@ use App\Commands\Visit;
 final class Parser {
 	private const int URI_PREFIX_LEN = 19;	// "https://stitcher.io"
 	private const int DATE_LEN = 10;		// "2026-12-03"
-	private const int READ_CHUNK_SIZE = 2_097_152;
+	private const int READ_CHUNK_SIZE = 1_048_576;
 
 	private static string $input_path = '';
 	private static string $output_path = '';
-	private static ?array $known_paths = null;
+	private static ?array $known_path_set = null;
 	private static ?array $date_registry = null;
 
 	public function parse(string $input_path, string $output_path): void {
@@ -21,7 +21,7 @@ final class Parser {
 		Parser::$input_path = $input_path;
 		Parser::$output_path = $output_path;
 
-		$paths = Parser::getKnownPaths();
+		$paths = Parser::discoverPaths();
 		$path_count = count($paths);
 
 		$path_base_map = [];
@@ -35,20 +35,47 @@ final class Parser {
 		Parser::writePrettyJson($counts, $paths, $date_list, $date_count);
 	}
 
-	private static function getKnownPaths(): array {
-		if (Parser::$known_paths !== null) {
-			return Parser::$known_paths;
+	private static function getKnownPathSet(): array {
+		if (Parser::$known_path_set !== null) {
+			return Parser::$known_path_set;
 		}
 
-		$paths = [];
+		$known_path_set = [];
 
 		foreach (Visit::all() as $visit) {
-			$paths[] = substr($visit->uri, Parser::URI_PREFIX_LEN);
+			$path = substr($visit->uri, Parser::URI_PREFIX_LEN);
+			$known_path_set[$path] = true;
 		}
 
-		sort($paths, SORT_STRING);
+		return Parser::$known_path_set = $known_path_set;
+	}
 
-		return Parser::$known_paths = $paths;
+	private static function discoverPaths(): array {
+		$input = fopen(Parser::$input_path, 'r');
+
+		$known_path_set = Parser::getKnownPathSet();
+		$paths = [];
+		$seen = [];
+
+		while (($line = fgets($input)) !== false) {
+			$comma = strpos($line, ',');
+			if ($comma === false || $comma <= Parser::URI_PREFIX_LEN) {
+				continue;
+			}
+
+			$path = substr($line, Parser::URI_PREFIX_LEN, $comma - Parser::URI_PREFIX_LEN);
+
+			if (!isset($known_path_set[$path]) || isset($seen[$path])) {
+				continue;
+			}
+
+			$seen[$path] = true;
+			$paths[] = $path;
+		}
+
+		fclose($input);
+
+		return $paths;
 	}
 
 	private static function buildDateRegistry(): array {
@@ -204,7 +231,7 @@ final class Parser {
 
 		$date_prefixes = [];
 		for ($date_id = 0; $date_id < $date_count; ++$date_id) {
-			$date_prefixes[$date_id] = "\t\t\"" . $date_list[$date_id] . '": ';
+			$date_prefixes[$date_id] = "        \"" . $date_list[$date_id] . '": ';
 		}
 
 		$separator = '';
@@ -225,7 +252,7 @@ final class Parser {
 			}
 
 			$buffer = $separator;
-			$buffer .= "\t" . json_encode($path, JSON_PRETTY_PRINT) . ": {\n";
+			$buffer .= "    " . json_encode($path, JSON_PRETTY_PRINT) . ": {\n";
 			$buffer .= $date_prefixes[$first_date_id] . $counts[$base + $first_date_id];
 
 			for ($date_id = $first_date_id + 1; $date_id < $date_count; ++$date_id) {
@@ -238,13 +265,13 @@ final class Parser {
 				$buffer .= $date_prefixes[$date_id] . $count;
 			}
 
-			$buffer .= "\n\t}";
+			$buffer .= "\n    }";
 
 			fwrite($output, $buffer);
 			$separator = ",\n";
 		}
 
-		fwrite($output, "\n}\n");
+		fwrite($output, "\n}");
 		fclose($output);
 	}
 }
