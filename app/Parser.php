@@ -202,9 +202,9 @@ final class Parser {
 					$path = substr($buffer, $path_start, $comma - $path_start);
 					$path_base = $path_base_map[$path] ?? null;
 
-					if (!empty($path_base)) {
+					if ($path_base !== null) {
 						$date_id = Parser::parseDateId($buffer, $comma + 1);
-						if (!empty($date_id)) {
+						if ($date_id !== null) {
 							++$counts[$path_base + $date_id];
 						}
 					}
@@ -222,9 +222,9 @@ final class Parser {
 				$path = substr($tail, self::URI_PREFIX_LEN, $comma - self::URI_PREFIX_LEN);
 				$path_base = $path_base_map[$path] ?? null;
 
-				if (!empty($path_base)) {
+				if ($path_base !== null) {
 					$date_id = Parser::parseDateId($tail, $comma + 1);
-					if (!empty($date_id)) {
+					if ($date_id !== null) {
 						++$counts[$path_base + $date_id];
 					}
 				}
@@ -234,8 +234,7 @@ final class Parser {
 		fclose($input);
 	}
 
-	// parse the buffer and fetch the date id according to the offset given
-	// year offset - days in years from 2021 to the given year, month offset - days in months from the start of the year to the given month, day offset - well... the days in the month
+	// parse the buffer and fetch the date id according to the offset given (year offset - days in years from 2021 to the given year, month offset - days in months from the start of the year to the given month, day offset - well... it adds the days)
 	private static function parseDateId(string $buffer, int $offset): ?int {
 		if (!isset(
 			$buffer[$offset + 9],
