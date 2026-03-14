@@ -129,10 +129,7 @@ final class Parser {
 
 	// count the visits to each blogpost and record the order in which paths first appeared in the csv
 	private static function countVisits(array $path_base_map, array $date_id_map, array &$counts): array {
-		$input = fopen(Parser::$input_path, 'rb');
-		if ($input === false) {
-			throw new \RuntimeException('Failed to open input file.');
-		}
+		$input = fopen(Parser::$input_path, 'r');
 
 		stream_set_read_buffer($input, 0);
 
@@ -144,11 +141,6 @@ final class Parser {
 		// optimization - read 1mb of data every time
 		while (!feof($input)) {
 			$buffer = fread($input, Parser::READ_CHUNK_SIZE);
-
-			if ($buffer === false) {
-				fclose($input);
-				throw new \RuntimeException('Failed to read input file.');
-			}
 
 			if ($buffer === '') {
 				break;
