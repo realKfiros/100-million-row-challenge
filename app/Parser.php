@@ -19,7 +19,7 @@ final class Parser {
 	public function parse(string $input_path, string $output_path): void {
 		gc_disable();
 
-		$date_list = Parser::buildDateList();
+		[$date_list, $date_id_map] = Parser::buildDateList();
 		$date_count = count($date_list);
 
 		Parser::$input_path = $input_path;
@@ -36,7 +36,7 @@ final class Parser {
 		$counts = array_fill(0, $path_count * $date_count, 0);
 
 		// count visits and collect paths in first-appearance order from the csv
-		$encountered_paths = Parser::countVisits($path_base_map, $counts);
+		$encountered_paths = Parser::countVisits($path_base_map, $date_id_map, $counts);
 
 		Parser::writePrettyJson($counts, $encountered_paths, $path_id_map, $date_list, $date_count);
 	}
@@ -58,10 +58,16 @@ final class Parser {
 	// build a list of all the dates we'll be counting - in our case the start of 2021 to the end of 2026
 	private static function buildDateList(): array {
 		if (!empty(Parser::$date_list)) {
-			return Parser::$date_list;
+			$date_id_map = [];
+			foreach (Parser::$date_list as $date_id => $date) {
+				$date_id_map[$date] = $date_id;
+			}
+
+			return [Parser::$date_list, $date_id_map];
 		}
 
 		$date_list = [];
+		$date_id_map = [];
 		$date_id = 0;
 
 		for ($year = 2021; $year <= 2026; ++$year) {
@@ -73,15 +79,21 @@ final class Parser {
 				};
 
 				for ($day = 1; $day <= $max_day; ++$day) {
-					$date_list[$date_id++] =
+					$date =
 						$year . '-' .
 						($month < 10 ? '0' : '') . $month . '-' .
 						($day < 10 ? '0' : '') . $day;
+
+					$date_list[$date_id] = $date;
+					$date_id_map[$date] = $date_id;
+					++$date_id;
 				}
 			}
 		}
 
-		return Parser::$date_list = $date_list;
+		Parser::$date_list = $date_list;
+
+		return [$date_list, $date_id_map];
 	}
 
 	// pre-calculate year offsets so we won't loop over years on every single row
@@ -116,19 +128,27 @@ final class Parser {
 	}
 
 	// count the visits to each blogpost and record the order in which paths first appeared in the csv
-	private static function countVisits(array $path_base_map, array &$counts): array {
-		Parser::initYearOffsets();
-		Parser::initMonthOffsets();
+	private static function countVisits(array $path_base_map, array $date_id_map, array &$counts): array {
+		$input = fopen(Parser::$input_path, 'rb');
+		if ($input === false) {
+			throw new \RuntimeException('Failed to open input file.');
+		}
 
-		$input = fopen(Parser::$input_path, 'r');
+		stream_set_read_buffer($input, 0);
 
 		$tail = '';
 		$seen_paths = [];
 		$encountered_paths = [];
+		$path_cache = [];
 
 		// optimization - read 1mb of data every time
 		while (!feof($input)) {
 			$buffer = fread($input, Parser::READ_CHUNK_SIZE);
+
+			if ($buffer === false) {
+				fclose($input);
+				throw new \RuntimeException('Failed to read input file.');
+			}
 
 			if ($buffer === '') {
 				break;
@@ -146,8 +166,6 @@ final class Parser {
 
 			$chunk_len = $last_newline;
 			$p = self::URI_PREFIX_LEN;
-
-			// keep a bit of space in the end so it won't override the limit in the aggressive loop
 			$fence = $chunk_len - 1024;
 
 			while ($p < $fence) {
@@ -157,15 +175,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -176,15 +196,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -195,15 +217,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -214,15 +238,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -233,15 +259,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -252,15 +280,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -271,15 +301,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -290,15 +322,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 				$p = $sep + self::NEXT_PATH_OFFSET;
@@ -312,15 +346,17 @@ final class Parser {
 				}
 
 				$path = substr($buffer, $p, $sep - $p);
-				if (isset($path_base_map[$path])) {
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($buffer, $sep + 1);
+					$date = substr($buffer, $sep + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 
@@ -334,16 +370,18 @@ final class Parser {
 			$comma = strpos($tail, ',');
 			if ($comma !== false && $comma > self::URI_PREFIX_LEN) {
 				$path = substr($tail, self::URI_PREFIX_LEN, $comma - self::URI_PREFIX_LEN);
+				$path_base = $path_cache[$path] ??= ($path_base_map[$path] ?? null);
 
-				if (isset($path_base_map[$path])) {
+				if ($path_base !== null) {
 					if (!isset($seen_paths[$path])) {
 						$seen_paths[$path] = true;
 						$encountered_paths[] = $path;
 					}
 
-					$date_id = Parser::parseDateId($tail, $comma + 1);
+					$date = substr($tail, $comma + 1, 10);
+					$date_id = $date_id_map[$date] ?? null;
 					if ($date_id !== null) {
-						++$counts[$path_base_map[$path] + $date_id];
+						++$counts[$path_base + $date_id];
 					}
 				}
 			}
